@@ -6,6 +6,12 @@ import Foundation
 /// Squelette prêt à brancher sur une API de données de marché externe — non utilisé tant
 /// qu'aucune URL de production n'est fournie. Remplacer `MockMarketDataService` par ce type
 /// dans `AppDependencies` une fois l'API disponible.
+///
+/// Important : EA fait coexister un marché "Console" (PS5/Xbox, prix partagés) et un marché
+/// PC distinct, avec des prix qui divergent réellement. `UserFilterSettings.platform` porte
+/// la préférence de l'utilisateur (PS5 par défaut) ; une vraie intégration doit transmettre
+/// cette plateforme à l'API (paramètre de requête ou endpoint dédié) pour chaque appel REST/WS
+/// ci-dessous, sans quoi les prix récupérés ne correspondraient pas au bon marché.
 final class RemoteMarketDataService: NSObject, MarketDataServiceProtocol {
     private let baseURL: URL
     private let session: URLSession

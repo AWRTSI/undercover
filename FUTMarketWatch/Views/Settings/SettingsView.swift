@@ -28,6 +28,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 notificationSection
+                platformSection
                 budgetSection
                 riskSection
                 typesSection
@@ -61,6 +62,21 @@ struct SettingsView: View {
         case .provisional: return "Provisoires"
         case .ephemeral: return "Temporaires"
         @unknown default: return "Inconnu"
+        }
+    }
+
+    private var platformSection: some View {
+        Section {
+            Picker("Marché", selection: Binding(
+                get: { filterSettings.platform },
+                set: { filterSettings.platform = $0 }
+            )) {
+                ForEach(GamingPlatform.allCases) { platform in
+                    Text(platform.rawValue).tag(platform)
+                }
+            }
+        } footer: {
+            Text("EA sépare le marché Console (PS5/Xbox, mêmes prix) du marché PC. Les prix affichés ici restent 100% simulés tant qu'aucune vraie source de données n'est branchée (voir RemoteMarketDataService) ; ce réglage prépare l'intégration future pour cibler le bon marché.")
         }
     }
 

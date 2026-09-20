@@ -16,6 +16,11 @@ final class UserFilterSettings {
     var maxRiskLevelRaw: String
     /// Types d'alertes activés (snipe, tendance, fodder SBC, investissement).
     var enabledAlertTypesRaw: [String]
+    /// Marché ciblé (Console = PS5/Xbox, ou PC) : les prix EA diffèrent réellement entre les deux.
+    /// Tant qu'aucune vraie source de données n'est branchée (voir `RemoteMarketDataService`),
+    /// ce réglage ne fait qu'indiquer l'intention pour l'intégration future — le mock ne
+    /// simule qu'un seul marché générique, non spécifique à une plateforme.
+    var platformRaw: String
 
     /// Valeurs par défaut volontairement permissives : un premier lancement doit montrer des
     /// opportunités concrètes plutôt qu'un flux vide, quitte à ce que l'utilisateur resserre
@@ -28,18 +33,25 @@ final class UserFilterSettings {
         minimumNetProfit: Int = 500,
         minimumMarginPercent: Double = 0.05,
         maxRiskLevel: RiskLevel = .medium,
-        enabledAlertTypes: [AlertType] = AlertType.allCases
+        enabledAlertTypes: [AlertType] = AlertType.allCases,
+        platform: GamingPlatform = .console
     ) {
         self.availableBudget = availableBudget
         self.minimumNetProfit = minimumNetProfit
         self.minimumMarginPercent = minimumMarginPercent
         self.maxRiskLevelRaw = maxRiskLevel.rawValue
         self.enabledAlertTypesRaw = enabledAlertTypes.map(\.rawValue)
+        self.platformRaw = platform.rawValue
     }
 
     var maxRiskLevel: RiskLevel {
         get { RiskLevel(rawValue: maxRiskLevelRaw) ?? .medium }
         set { maxRiskLevelRaw = newValue.rawValue }
+    }
+
+    var platform: GamingPlatform {
+        get { GamingPlatform(rawValue: platformRaw) ?? .console }
+        set { platformRaw = newValue.rawValue }
     }
 
     var enabledAlertTypes: Set<AlertType> {
