@@ -32,6 +32,16 @@ actor MockMarketDataService: MarketDataServiceProtocol {
         return sbcs
     }
 
+    /// Le mock n'a de toute façon qu'un petit catalogue fixe : une "recherche à la demande"
+    /// revient juste à filtrer localement, contrairement à `RemoteMarketDataService` qui, lui,
+    /// interroge vraiment une source externe au-delà de ce qui est déjà chargé.
+    func searchPlayers(query: String) async throws -> [Player] {
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return players }
+        return players.filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
+    }
+
     /// Simule un flux de mises à jour en faisant fluctuer aléatoirement un joueur toutes les
     /// quelques secondes, à la manière d'un WebSocket de marché en temps réel. `nonisolated` pour
     /// rester appelable sans `await` (comme le veut le protocole) ; la tâche interne repasse par

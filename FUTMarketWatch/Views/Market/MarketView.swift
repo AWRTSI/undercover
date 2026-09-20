@@ -34,7 +34,15 @@ struct MarketView: View {
                 }
             }
             .overlay {
-                if viewModel.filteredAndSortedPlayers.isEmpty {
+                if viewModel.isSearchingRemotely {
+                    ProgressView("Recherche sur le marché…")
+                } else if viewModel.filteredAndSortedPlayers.isEmpty && viewModel.lastRemoteSearchFoundNothing {
+                    ContentUnavailableView(
+                        "Aucune carte trouvée",
+                        systemImage: "magnifyingglass",
+                        description: Text("Ni dans les cartes déjà suivies, ni dans une recherche élargie sur la source de données.")
+                    )
+                } else if viewModel.filteredAndSortedPlayers.isEmpty {
                     ContentUnavailableView.search
                 }
             }
@@ -43,6 +51,9 @@ struct MarketView: View {
                 viewModel.startObservingLiveUpdates()
             }
             .onDisappear { viewModel.stopObservingLiveUpdates() }
+            .onChange(of: viewModel.searchText) {
+                viewModel.searchTextDidChange()
+            }
         }
     }
 }

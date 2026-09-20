@@ -30,7 +30,30 @@ actor RemoteMarketDataService: MarketDataServiceProtocol {
         let url = baseURL.appendingPathComponent("players")
         let (data, response) = try await session.data(from: url)
         try Self.validate(response)
+        return try mapPlayers(from: data)
+    }
 
+    /// Interroge la recherche FUTBIN à la demande (voir `GET /search` côté scraper) plutôt que
+    /// le sous-ensemble déjà suivi en continu — seule façon de trouver une carte qui n'est pas
+    /// dans les quelques centaines pré-scrapées.
+    func searchPlayers(query: String) async throws -> [Player] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return try await fetchMarketSnapshot() }
+
+        guard var components = URLComponents(url: baseURL.appendingPathComponent("search"), resolvingAgainstBaseURL: false) else {
+            throw MarketDataError.unknown
+        }
+        components.queryItems = [URLQueryItem(name: "q", value: trimmed)]
+        guard let url = components.url else { throw MarketDataError.unknown }
+
+        let (data, response) = try await session.data(from: url)
+        try Self.validate(response)
+        return try mapPlayers(from: data)
+    }
+
+    /// Partagé par `fetchMarketSnapshot` et `searchPlayers` : les deux endpoints du scraper
+    /// renvoient exactement la même forme JSON (`{ players: [...] }`).
+    private func mapPlayers(from data: Data) throws -> [Player] {
         let decoded: ScrapedPlayersResponse
         do {
             decoded = try JSONDecoder().decode(ScrapedPlayersResponse.self, from: data)

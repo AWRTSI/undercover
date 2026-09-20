@@ -8,6 +8,8 @@ final class MarketViewModel: ObservableObject {
     @Published private(set) var players: [Player] = []
     @Published var searchText: String = ""
     @Published var sortOption: SortOption = .deviationAscending
+    @Published private(set) var isSearchingRemotely = false
+    @Published private(set) var lastRemoteSearchFoundNothing = false
 
     enum SortOption: String, CaseIterable, Identifiable {
         case deviationAscending = "Plus sous-évaluées"
@@ -19,6 +21,7 @@ final class MarketViewModel: ObservableObject {
 
     private let dependencies: AppDependencies
     private var streamTask: Task<Void, Never>?
+    private var remoteSearchTask: Task<Void, Never>?
 
     init(dependencies: AppDependencies) {
         self.dependencies = dependencies
@@ -63,5 +66,35 @@ final class MarketViewModel: ObservableObject {
     func stopObservingLiveUpdates() {
         streamTask?.cancel()
         streamTask = nil
+    }
+
+    /// Déclenché quand `searchText` change. Le filtre local (`filteredAndSortedPlayers`) ne
+    /// porte que sur ce qui est déjà chargé — un catalogue réel (FUTBIN) en compte des dizaines
+    /// de milliers, bien plus que ce qui est suivi en continu. Si rien ne correspond localement,
+    /// on tente une recherche à distance après un court délai (pas à chaque frappe).
+    func searchTextDidChange() {
+        remoteSearchTask?.cancel()
+        lastRemoteSearchFoundNothing = false
+
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        guard query.count >= 3, filteredAndSortedPlayers.isEmpty else { return }
+
+        remoteSearchTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard let self, !Task.isCancelled else { return }
+
+            isSearchingRemotely = true
+            defer { isSearchingRemotely = false }
+
+            guard let results = try? await dependencies.marketDataService.searchPlayers(query: query),
+                  !Task.isCancelled else { return }
+
+            var didAddAny = false
+            for result in results where !players.contains(where: { $0.id == result.id }) {
+                players.append(result)
+                didAddAny = true
+            }
+            lastRemoteSearchFoundNothing = !didAddAny
+        }
     }
 }
