@@ -248,11 +248,11 @@ app.get('/debug-scrape', async (_req, res) => {
   try {
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ userAgent: USER_AGENT });
-    const response = await page.goto(`${FUTBIN_BASE}?page=1`, { waitUntil: 'networkidle', timeout: 30000 });
-    const found = await page.waitForSelector('table tbody tr.player-row', { timeout: 15000 }).then(() => true).catch(() => false);
+    const response = await page.goto(`${FUTBIN_BASE}?page=1`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const found = await page.waitForSelector('table tbody tr.player-row', { timeout: 20000 }).then(() => true).catch(() => false);
     const rowCount = await page.$$eval('table tbody tr.player-row', (trs) => trs.length).catch(() => -1);
     const title = await page.title().catch(() => '?');
-    const bodySnippet = await page.evaluate(() => document.body?.innerText?.slice(0, 500) ?? '').catch(() => '?');
+    const bodySnippet = await page.evaluate(() => document.body?.innerText?.slice(0, 1000) ?? '').catch(() => '?');
     await page.close();
     res.json({
       finalURL: page.url(),
