@@ -32,4 +32,10 @@ protocol MarketDataServiceProtocol {
     /// Ouvre un flux continu de mises à jour de prix (WebSocket ou polling déguisé en stream).
     /// L'appelant doit itérer sur le flux tant que l'écran concerné est visible.
     func priceUpdatesStream() -> AsyncStream<Player>
+
+    /// Recherche à la demande, au-delà du sous-ensemble déjà chargé/suivi en continu — utile
+    /// quand le catalogue complet est bien plus grand que ce qu'un snapshot périodique couvre
+    /// (des dizaines de milliers de cartes chez un vrai fournisseur type FUTBIN, contre une
+    /// poignée effectivement suivies). Une requête vide retourne le snapshot déjà connu.
+    func searchPlayers(query: String) async throws -> [Player]
 }

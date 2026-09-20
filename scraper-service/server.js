@@ -49,16 +49,31 @@ function mapRarity(cardTypeLabel) {
   if (label.includes('icon')) return 'icon';
   if (label.includes('hero')) return 'hero';
   if (label.includes('rare')) return 'rare';
-  if (label.includes('common')) return 'common';
+  // FUTBIN appelle "Normal" ses cartes de base non-spéciales (pas "Common") — c'est
+  // l'équivalent de notre rareté "commune".
+  if (label.includes('common') || label.includes('normal')) return 'common';
   return 'special'; // TOTW, TOTS, promo, etc.
 }
 
-async function scrapePage(browser, pageNumber) {
+/** Scrape la page listant des joueurs pour une query string FUTBIN donnée — que ce soit une
+ * page numérotée (`?page=N`, pour le rafraîchissement périodique) ou une recherche par nom
+ * (`?search=...`, pour trouver une carte hors du sous-ensemble suivi en continu). Les deux
+ * affichent le même tableau, donc la même extraction s'applique aux deux. */
+async function scrapeQuery(browser, queryString) {
   const page = await browser.newPage({ userAgent: USER_AGENT });
   const results = [];
   try {
-    await page.goto(`${FUTBIN_BASE}?page=${pageNumber}`, { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForSelector('table tbody tr.player-row', { timeout: 15000 });
+    const response = await page.goto(`${FUTBIN_BASE}${queryString}`, { waitUntil: 'networkidle', timeout: 30000 });
+    const found = await page.waitForSelector('table tbody tr.player-row', { timeout: 15000 }).then(() => true).catch(() => false);
+
+    if (!found) {
+      // Diagnostic : si le tableau attendu n'apparaît pas, on log ce qu'on a vraiment reçu
+      // (titre, statut HTTP, un extrait du texte) pour distinguer un blocage anti-bot d'un
+      // vrai "aucun résultat" — visible dans les logs Render sans avoir à redéployer.
+      const title = await page.title().catch(() => '?');
+      const bodySnippet = await page.evaluate(() => document.body?.innerText?.slice(0, 200) ?? '').catch(() => '?');
+      console.log(`[scrape] table absente pour "${queryString}" — status=${response?.status()} title="${title}" body="${bodySnippet.replace(/\n/g, ' ')}"`);
+    }
 
     const rows = await page.$$eval('table tbody tr.player-row', (trs) =>
       trs.map((tr) => {
@@ -110,29 +125,41 @@ async function scrapePage(browser, pageNumber) {
   return results;
 }
 
+/** Enregistre des lignes fraîchement scrapées dans l'état partagé (dernière fiche + historique
+ * de prix) — utilisé aussi bien par le rafraîchissement périodique que par la recherche à la
+ * demande, pour qu'une carte trouvée par recherche soit désormais suivie comme les autres. */
+function recordScrapedRows(rows, scrapedAt) {
+  for (const row of rows) {
+    state.playersById.set(row.id, { ...row, updatedAt: scrapedAt });
+
+    // Le marché "console" (PS5/Xbox partagent le même prix chez EA) est celui qu'on
+    // retient par défaut pour l'historique — voir GamingPlatform.swift côté app.
+    const trackedPrice = row.pricePS ?? row.pricePC;
+    if (trackedPrice == null) continue;
+
+    const history = state.historyById.get(row.id) ?? [];
+    history.push({ timestamp: scrapedAt, price: trackedPrice });
+    if (history.length > MAX_HISTORY_POINTS) history.shift();
+    state.historyById.set(row.id, history);
+  }
+}
+
+function buildResponsePlayer(row, scrapedAt) {
+  const history = state.historyById.get(row.id) ?? [];
+  const rollingAveragePrice = history.length
+    ? Math.round(history.reduce((sum, point) => sum + point.price, 0) / history.length)
+    : null;
+  return { ...row, updatedAt: scrapedAt, rollingAveragePrice, history };
+}
+
 async function runScrape() {
   if (state.isScraping) return;
   state.isScraping = true;
   const browser = await chromium.launch({ headless: true });
   try {
     for (const pageNumber of PAGES_TO_SCRAPE) {
-      const rows = await scrapePage(browser, pageNumber);
-      const scrapedAt = Date.now();
-
-      for (const row of rows) {
-        state.playersById.set(row.id, { ...row, updatedAt: scrapedAt });
-
-        // Le marché "console" (PS5/Xbox partagent le même prix chez EA) est celui qu'on
-        // retient par défaut pour l'historique — voir GamingPlatform.swift côté app.
-        const trackedPrice = row.pricePS ?? row.pricePC;
-        if (trackedPrice == null) continue;
-
-        const history = state.historyById.get(row.id) ?? [];
-        history.push({ timestamp: scrapedAt, price: trackedPrice });
-        if (history.length > MAX_HISTORY_POINTS) history.shift();
-        state.historyById.set(row.id, history);
-      }
-
+      const rows = await scrapeQuery(browser, `?page=${pageNumber}`);
+      recordScrapedRows(rows, Date.now());
       // Pause courte entre deux pages pour rester raisonnable vis-à-vis de FUTBIN.
       await new Promise((resolve) => setTimeout(resolve, 1500));
     }
@@ -140,6 +167,21 @@ async function runScrape() {
   } finally {
     await browser.close();
     state.isScraping = false;
+  }
+}
+
+/** Recherche à la demande : contrairement au rafraîchissement périodique (limité à un
+ * sous-ensemble de pages), ça interroge FUTBIN par nom et peut donc trouver n'importe quelle
+ * carte du catalogue complet, pas seulement celles déjà suivies. */
+async function searchPlayers(name) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const rows = await scrapeQuery(browser, `?search=${encodeURIComponent(name)}`);
+    const scrapedAt = Date.now();
+    recordScrapedRows(rows, scrapedAt);
+    return rows.map((row) => buildResponsePlayer(row, scrapedAt));
+  } finally {
+    await browser.close();
   }
 }
 
@@ -160,13 +202,8 @@ app.get('/players', async (_req, res) => {
     // On embarque la moyenne mobile et l'historique directement ici : ça évite à l'app d'avoir
     // à faire un appel /players/:id/history par carte (des dizaines de requêtes séparées), vu
     // que le serveur les a déjà en mémoire de toute façon.
-    const players = Array.from(state.playersById.values()).map((player) => {
-      const history = state.historyById.get(player.id) ?? [];
-      const rollingAveragePrice = history.length
-        ? Math.round(history.reduce((sum, point) => sum + point.price, 0) / history.length)
-        : null;
-      return { ...player, rollingAveragePrice, history };
-    });
+    const scrapedAt = state.lastScrapedAt ?? Date.now();
+    const players = Array.from(state.playersById.values()).map((player) => buildResponsePlayer(player, scrapedAt));
     res.json({ lastScrapedAt: state.lastScrapedAt, players });
   } catch (error) {
     res.status(502).json({ error: 'scrape_failed', message: String(error) });
@@ -176,6 +213,20 @@ app.get('/players', async (_req, res) => {
 app.get('/players/:id/history', async (req, res) => {
   const history = state.historyById.get(req.params.id) ?? [];
   res.json({ id: req.params.id, history });
+});
+
+app.get('/search', async (req, res) => {
+  const query = (req.query.q ?? '').toString().trim();
+  if (!query) {
+    res.status(400).json({ error: 'missing_query', message: 'Paramètre ?q= requis.' });
+    return;
+  }
+  try {
+    const players = await searchPlayers(query);
+    res.json({ query, players });
+  } catch (error) {
+    res.status(502).json({ error: 'search_failed', message: String(error) });
+  }
 });
 
 app.post('/refresh', async (_req, res) => {
