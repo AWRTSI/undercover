@@ -6,24 +6,28 @@ import SwiftData
 
 @Model
 final class UserFilterSettings {
+    // Chaque propriété porte une valeur par défaut À LA DÉCLARATION (pas seulement dans
+    // l'initialiseur) : c'est ce que SwiftData utilise pour combler la colonne manquante des
+    // lignes déjà persistées quand on ajoute un champ à ce modèle dans une nouvelle version de
+    // l'app. Sans ça, une mise à jour "sur place" (comme le fait Sideloadly) sur un appareil
+    // ayant déjà une ancienne base plante au lancement — c'est exactement ce qui est arrivé en
+    // ajoutant `platformRaw` puis `apiBaseURLString` sans ces valeurs par défaut.
+
     /// Budget disponible en pièces ; les opportunités dont le prix d'achat dépasse ce montant sont ignorées.
-    var availableBudget: Int
+    var availableBudget: Int = 3_000_000
     /// Bénéfice net minimum (en pièces) requis pour déclencher une notification.
-    var minimumNetProfit: Int
+    var minimumNetProfit: Int = 500
     /// Marge minimum en pourcentage requise en plus du bénéfice net minimum.
-    var minimumMarginPercent: Double
+    var minimumMarginPercent: Double = 0.05
     /// Niveau de risque maximum accepté ; les alertes plus risquées sont filtrées.
-    var maxRiskLevelRaw: String
+    var maxRiskLevelRaw: String = RiskLevel.medium.rawValue
     /// Types d'alertes activés (snipe, tendance, fodder SBC, investissement).
-    var enabledAlertTypesRaw: [String]
+    var enabledAlertTypesRaw: [String] = AlertType.allCases.map(\.rawValue)
     /// Marché ciblé (Console = PS5/Xbox, ou PC) : les prix EA diffèrent réellement entre les deux.
-    /// Tant qu'aucune vraie source de données n'est branchée (voir `RemoteMarketDataService`),
-    /// ce réglage ne fait qu'indiquer l'intention pour l'intégration future — le mock ne
-    /// simule qu'un seul marché générique, non spécifique à une plateforme.
-    var platformRaw: String
+    var platformRaw: String = GamingPlatform.console.rawValue
     /// URL du service de scraping FUTBIN déployé (voir `scraper-service/`), ex.
     /// "https://fut-market-scraper.onrender.com". Vide = données simulées (mock).
-    var apiBaseURLString: String
+    var apiBaseURLString: String = ""
 
     /// Valeurs par défaut volontairement permissives : un premier lancement doit montrer des
     /// opportunités concrètes plutôt qu'un flux vide, quitte à ce que l'utilisateur resserre
