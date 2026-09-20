@@ -9,6 +9,9 @@ struct ContentView: View {
             DashboardView(dependencies: dependencies)
                 .tabItem { Label("Dashboard", systemImage: "gauge.with.dots.needle.67percent") }
 
+            MarketView(dependencies: dependencies)
+                .tabItem { Label("Marché", systemImage: "magnifyingglass") }
+
             AlertsView(dependencies: dependencies)
                 .tabItem { Label("Filons", systemImage: "bell.badge.fill") }
 

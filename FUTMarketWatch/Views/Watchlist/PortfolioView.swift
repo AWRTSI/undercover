@@ -124,25 +124,69 @@ private struct TransactionRow: View {
     }
 }
 
+private enum PurchaseEntryMode: String, CaseIterable, Identifiable {
+    case market = "Depuis le marché"
+    case manual = "Carte personnalisée"
+    var id: String { rawValue }
+}
+
 private struct RecordPurchaseSheet: View {
     @ObservedObject var viewModel: PortfolioViewModel
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
+    @State private var mode: PurchaseEntryMode = .market
     @State private var selectedPlayer: Player?
     @State private var buyPrice: String = ""
+
+    @State private var manualName: String = ""
+    @State private var manualClub: String = ""
+    @State private var manualOverall: String = ""
+
+    private var isValid: Bool {
+        guard Int(buyPrice) != nil else { return false }
+        switch mode {
+        case .market:
+            return selectedPlayer != nil
+        case .manual:
+            return !manualName.trimmingCharacters(in: .whitespaces).isEmpty && Int(manualOverall) != nil
+        }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Joueur") {
-                    Picker("Carte", selection: $selectedPlayer) {
-                        Text("Sélectionner").tag(Player?.none)
-                        ForEach(MockData.players) { player in
-                            Text("\(player.name) (\(player.overall) OVR)").tag(Player?.some(player))
+                Section {
+                    Picker("Mode", selection: $mode) {
+                        ForEach(PurchaseEntryMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
                         }
                     }
+                    .pickerStyle(.segmented)
                 }
+
+                switch mode {
+                case .market:
+                    Section("Joueur du marché simulé") {
+                        Picker("Carte", selection: $selectedPlayer) {
+                            Text("Sélectionner").tag(Player?.none)
+                            ForEach(MockData.players) { player in
+                                Text("\(player.name) (\(player.overall) OVR)").tag(Player?.some(player))
+                            }
+                        }
+                    }
+                case .manual:
+                    Section("N'importe quelle carte") {
+                        TextField("Nom du joueur", text: $manualName)
+                        TextField("Club", text: $manualClub)
+                        TextField("Note globale (OVR)", text: $manualOverall)
+                            .keyboardType(.numberPad)
+                    }
+                    Text("Cette carte n'existe pas dans le marché simulé : sa valeur ne sera pas mise à jour automatiquement.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Prix d'achat") {
                     TextField("Ex. 2 400 000", text: $buyPrice)
                         .keyboardType(.numberPad)
@@ -155,11 +199,25 @@ private struct RecordPurchaseSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Ajouter") {
-                        guard let player = selectedPlayer, let price = Int(buyPrice) else { return }
-                        viewModel.recordPurchase(player: player, buyPrice: price, context: modelContext)
+                        guard let price = Int(buyPrice) else { return }
+                        switch mode {
+                        case .market:
+                            guard let player = selectedPlayer else { return }
+                            viewModel.recordPurchase(player: player, buyPrice: price, context: modelContext)
+                        case .manual:
+                            guard let overall = Int(manualOverall) else { return }
+                            let club = manualClub.trimmingCharacters(in: .whitespaces)
+                            viewModel.recordManualPurchase(
+                                name: manualName.trimmingCharacters(in: .whitespaces),
+                                club: club.isEmpty ? "Club inconnu" : club,
+                                overall: overall,
+                                buyPrice: price,
+                                context: modelContext
+                            )
+                        }
                         dismiss()
                     }
-                    .disabled(selectedPlayer == nil || Int(buyPrice) == nil)
+                    .disabled(!isValid)
                 }
             }
         }

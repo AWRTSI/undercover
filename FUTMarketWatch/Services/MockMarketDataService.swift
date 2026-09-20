@@ -2,7 +2,13 @@ import Foundation
 
 /// Implémentation factice de `MarketDataServiceProtocol` : simule les fluctuations de prix en
 /// mémoire pour permettre de développer et tester l'UI et l'algorithme sans backend actif.
-final class MockMarketDataService: MarketDataServiceProtocol {
+///
+/// Déclaré comme `actor` (et non `final class`) car Dashboard, Marché et Filons appellent tous
+/// `priceUpdatesStream()` en parallèle sur cette même instance partagée : sans isolation, les
+/// multiples tâches internes mutaient le tableau `players` en même temps depuis des threads
+/// différents, ce qui déclenche une violation d'exclusivité Swift (plantage aléatoire et
+/// difficile à reproduire). L'acteur garantit qu'un seul accès à `players` a lieu à la fois.
+actor MockMarketDataService: MarketDataServiceProtocol {
     private var players: [Player]
     private let sbcs: [SBCRequirement]
 
@@ -27,24 +33,31 @@ final class MockMarketDataService: MarketDataServiceProtocol {
     }
 
     /// Simule un flux de mises à jour en faisant fluctuer aléatoirement un joueur toutes les
-    /// quelques secondes, à la manière d'un WebSocket de marché en temps réel.
-    func priceUpdatesStream() -> AsyncStream<Player> {
+    /// quelques secondes, à la manière d'un WebSocket de marché en temps réel. `nonisolated` pour
+    /// rester appelable sans `await` (comme le veut le protocole) ; la tâche interne repasse par
+    /// l'acteur via `await` à chaque mutation pour rester thread-safe.
+    nonisolated func priceUpdatesStream() -> AsyncStream<Player> {
         AsyncStream { continuation in
             let task = Task {
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 4_000_000_000)
-                    guard let index = players.indices.randomElement() else { continue }
-                    var updated = players[index]
-                    let variation = Double.random(in: -0.08...0.05)
-                    let newPrice = max(150, Int(Double(updated.currentPrice) * (1 + variation)))
-                    updated.currentPrice = newPrice
-                    updated.priceHistory.append(PricePoint(timestamp: .now, price: newPrice))
-                    players[index] = updated
+                    guard let updated = await self.applyRandomFluctuation() else { continue }
                     continuation.yield(updated)
                 }
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    private func applyRandomFluctuation() -> Player? {
+        guard let index = players.indices.randomElement() else { return nil }
+        var updated = players[index]
+        let variation = Double.random(in: -0.08...0.05)
+        let newPrice = max(150, Int(Double(updated.currentPrice) * (1 + variation)))
+        updated.currentPrice = newPrice
+        updated.priceHistory.append(PricePoint(timestamp: .now, price: newPrice))
+        players[index] = updated
+        return updated
     }
 }

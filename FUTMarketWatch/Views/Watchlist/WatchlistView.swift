@@ -28,7 +28,8 @@ struct WatchlistView: View {
                             WatchlistRow(
                                 item: item,
                                 marketPrice: viewModel.marketPrice(for: item),
-                                reachedTarget: viewModel.hasReachedTarget(item)
+                                reachedTarget: viewModel.hasReachedTarget(item),
+                                isTrackedLive: viewModel.isTrackedLive(item)
                             )
                         }
                         .onDelete { indexSet in
@@ -58,6 +59,7 @@ private struct WatchlistRow: View {
     let item: WatchlistItem
     let marketPrice: Int?
     let reachedTarget: Bool
+    let isTrackedLive: Bool
 
     var body: some View {
         HStack {
@@ -66,6 +68,11 @@ private struct WatchlistRow: View {
                 Text("\(item.club) · \(item.overall) OVR")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if !isTrackedLive {
+                    Label("Suivi manuel — vérifie le prix en jeu", systemImage: "hand.tap")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
@@ -87,25 +94,72 @@ private struct WatchlistRow: View {
     }
 }
 
+/// Deux façons d'ajouter une carte : la choisir dans le marché simulé (prix live disponible)
+/// ou la saisir manuellement — indispensable puisque le catalogue mock ne contient qu'une
+/// vingtaine de cartes alors que le jeu réel en compte des milliers.
+private enum WatchlistEntryMode: String, CaseIterable, Identifiable {
+    case market = "Depuis le marché"
+    case manual = "Carte personnalisée"
+    var id: String { rawValue }
+}
+
 private struct AddToWatchlistSheet: View {
     @ObservedObject var viewModel: WatchlistViewModel
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
+    @State private var mode: WatchlistEntryMode = .market
     @State private var selectedPlayer: Player?
     @State private var targetPrice: String = ""
+
+    @State private var manualName: String = ""
+    @State private var manualClub: String = ""
+    @State private var manualOverall: String = ""
+
+    private var isValid: Bool {
+        guard Int(targetPrice) != nil else { return false }
+        switch mode {
+        case .market:
+            return selectedPlayer != nil
+        case .manual:
+            return !manualName.trimmingCharacters(in: .whitespaces).isEmpty && Int(manualOverall) != nil
+        }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Joueur") {
-                    Picker("Carte", selection: $selectedPlayer) {
-                        Text("Sélectionner").tag(Player?.none)
-                        ForEach(MockData.players) { player in
-                            Text("\(player.name) (\(player.overall) OVR)").tag(Player?.some(player))
+                Section {
+                    Picker("Mode", selection: $mode) {
+                        ForEach(WatchlistEntryMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
                         }
                     }
+                    .pickerStyle(.segmented)
                 }
+
+                switch mode {
+                case .market:
+                    Section("Joueur du marché simulé") {
+                        Picker("Carte", selection: $selectedPlayer) {
+                            Text("Sélectionner").tag(Player?.none)
+                            ForEach(MockData.players) { player in
+                                Text("\(player.name) (\(player.overall) OVR)").tag(Player?.some(player))
+                            }
+                        }
+                    }
+                case .manual:
+                    Section("N'importe quelle carte") {
+                        TextField("Nom du joueur", text: $manualName)
+                        TextField("Club", text: $manualClub)
+                        TextField("Note globale (OVR)", text: $manualOverall)
+                            .keyboardType(.numberPad)
+                    }
+                    Text("Cette carte n'existe pas dans le marché simulé : pas de prix live, juste un rappel à ta cible d'achat.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Prix cible d'achat") {
                     TextField("Ex. 2 400 000", text: $targetPrice)
                         .keyboardType(.numberPad)
@@ -118,11 +172,25 @@ private struct AddToWatchlistSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Ajouter") {
-                        guard let player = selectedPlayer, let price = Int(targetPrice) else { return }
-                        viewModel.addToWatchlist(player: player, targetBuyPrice: price, context: modelContext)
+                        guard let price = Int(targetPrice) else { return }
+                        switch mode {
+                        case .market:
+                            guard let player = selectedPlayer else { return }
+                            viewModel.addToWatchlist(player: player, targetBuyPrice: price, context: modelContext)
+                        case .manual:
+                            guard let overall = Int(manualOverall) else { return }
+                            let club = manualClub.trimmingCharacters(in: .whitespaces)
+                            viewModel.addManualEntry(
+                                name: manualName.trimmingCharacters(in: .whitespaces),
+                                club: club.isEmpty ? "Club inconnu" : club,
+                                overall: overall,
+                                targetBuyPrice: price,
+                                context: modelContext
+                            )
+                        }
                         dismiss()
                     }
-                    .disabled(selectedPlayer == nil || Int(targetPrice) == nil)
+                    .disabled(!isValid)
                 }
             }
         }

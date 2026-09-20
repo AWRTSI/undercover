@@ -39,6 +39,25 @@ final class PortfolioViewModel: ObservableObject {
         context.insert(transaction)
     }
 
+    /// Enregistre l'achat d'une carte absente du marché simulé (catalogue mock limité).
+    /// Sans correspondance dans le flux de prix, la position ne bénéficiera pas de mises à
+    /// jour automatiques : `lastKnownMarketPrice` reste égal au prix d'achat jusqu'à ce que
+    /// l'utilisateur ajuste manuellement (fonctionnalité à prévoir si besoin d'édition).
+    func recordManualPurchase(name: String, club: String, overall: Int, buyPrice: Int, context: ModelContext) {
+        let holding = HoldingPosition(
+            playerID: UUID(),
+            playerName: name,
+            club: club,
+            overall: overall,
+            buyPrice: buyPrice,
+            lastKnownMarketPrice: buyPrice
+        )
+        context.insert(holding)
+
+        let transaction = Transaction(playerID: holding.playerID, playerName: name, side: .buy, amount: buyPrice)
+        context.insert(transaction)
+    }
+
     func recordSale(holding: HoldingPosition, sellPrice: Int, context: ModelContext) {
         let netProceeds = Player.netSalePrice(listingPrice: sellPrice)
         let transaction = Transaction(playerID: holding.playerID, playerName: holding.playerName, side: .sell, amount: netProceeds)

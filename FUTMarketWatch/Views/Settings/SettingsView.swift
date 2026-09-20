@@ -6,17 +6,22 @@ import SwiftData
 struct SettingsView: View {
     @StateObject private var viewModel: SettingsViewModel
     @Query private var filterSettingsList: [UserFilterSettings]
-    @Environment(\.modelContext) private var modelContext
+
+    /// Repli en mémoire, jamais inséré dans SwiftData. La ligne persistée réelle est créée une
+    /// seule fois au lancement de l'app (voir `FUTMarketWatchApp.bootstrapDefaultSettingsIfNeeded`).
+    /// Auparavant, chaque Stepper/Toggle de cet écran appelait indépendamment une propriété
+    /// calculée qui insérait un NOUVEL objet à chaque accès tant que `@Query` n'avait pas
+    /// rafraîchi sa liste : un seul rendu pouvait ainsi créer jusqu'à 8 lignes en double, et
+    /// chaque réglage écrivait sur un objet différent aussitôt jeté — les valeurs ne
+    /// persistaient jamais vraiment. D'où les plantages et réglages qui ne "prenaient" pas.
+    @State private var localFallback = UserFilterSettings()
 
     init(dependencies: AppDependencies) {
         _viewModel = StateObject(wrappedValue: SettingsViewModel(dependencies: dependencies))
     }
 
     private var filterSettings: UserFilterSettings {
-        if let existing = filterSettingsList.first { return existing }
-        let created = UserFilterSettings()
-        modelContext.insert(created)
-        return created
+        filterSettingsList.first ?? localFallback
     }
 
     var body: some View {

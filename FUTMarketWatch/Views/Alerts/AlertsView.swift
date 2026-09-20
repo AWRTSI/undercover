@@ -6,17 +6,18 @@ import SwiftData
 struct AlertsView: View {
     @StateObject private var viewModel: AlertsViewModel
     @Query private var filterSettingsList: [UserFilterSettings]
-    @Environment(\.modelContext) private var modelContext
 
     init(dependencies: AppDependencies) {
         _viewModel = StateObject(wrappedValue: AlertsViewModel(dependencies: dependencies))
     }
 
+    /// La ligne unique de préférences est créée une fois pour toutes au lancement de l'app
+    /// (voir `FUTMarketWatchApp.bootstrapDefaultSettingsIfNeeded`). Le repli local ci-dessous
+    /// n'est qu'une garde défensive et n'écrit jamais dans le contexte SwiftData depuis la vue :
+    /// insérer un modèle depuis une propriété lue pendant le rendu provoquait des ré-évaluations
+    /// en boucle et des plantages.
     private var filterSettings: UserFilterSettings {
-        if let existing = filterSettingsList.first { return existing }
-        let created = UserFilterSettings()
-        modelContext.insert(created)
-        return created
+        filterSettingsList.first ?? UserFilterSettings()
     }
 
     var body: some View {
@@ -42,7 +43,11 @@ struct AlertsView: View {
                 }
             }
             .navigationTitle("Filons")
-            .task {
+            .task(id: filterSettingsList.first?.persistentModelID) {
+                // Redémarre une fois la ligne persistée disponible, au cas où ce `.task`
+                // s'exécute avant le bootstrap au lancement de l'app (voir
+                // `FUTMarketWatchApp.bootstrapDefaultSettingsIfNeeded`) : sans ça, le flux
+                // resterait lié à un objet jetable, non lié aux Réglages persistés.
                 await viewModel.start(filterSettings: filterSettings)
             }
             .onDisappear { viewModel.stop() }

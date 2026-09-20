@@ -17,10 +17,16 @@ final class UserFilterSettings {
     /// Types d'alertes activés (snipe, tendance, fodder SBC, investissement).
     var enabledAlertTypesRaw: [String]
 
+    /// Valeurs par défaut volontairement permissives : un premier lancement doit montrer des
+    /// opportunités concrètes plutôt qu'un flux vide, quitte à ce que l'utilisateur resserre
+    /// ensuite ses critères dans les Réglages. Un budget par défaut de 100 000 pièces, par
+    /// exemple, filtrait silencieusement la quasi-totalité du catalogue (cartes à 150k-3M),
+    /// donnant l'impression que l'app "ne trouvait rien" alors qu'elle appliquait juste un
+    /// filtre trop strict.
     init(
-        availableBudget: Int = 100_000,
+        availableBudget: Int = 3_000_000,
         minimumNetProfit: Int = 500,
-        minimumMarginPercent: Double = 0.08,
+        minimumMarginPercent: Double = 0.05,
         maxRiskLevel: RiskLevel = .medium,
         enabledAlertTypes: [AlertType] = AlertType.allCases
     ) {
