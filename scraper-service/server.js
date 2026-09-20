@@ -63,8 +63,13 @@ async function scrapeQuery(browser, queryString) {
   const page = await browser.newPage({ userAgent: USER_AGENT });
   const results = [];
   try {
-    const response = await page.goto(`${FUTBIN_BASE}${queryString}`, { waitUntil: 'networkidle', timeout: 30000 });
-    const found = await page.waitForSelector('table tbody tr.player-row', { timeout: 15000 }).then(() => true).catch(() => false);
+    // `networkidle` attend qu'il n'y ait plus AUCUNE requête réseau pendant 500ms — une page
+    // avec de la pub, des trackers ou des mises à jour de prix en tâche de fond peut ne
+    // jamais atteindre cet état et systématiquement expirer au bout de 30s (observé en prod,
+    // confirmé via /debug-scrape). On attend juste le DOM, puis explicitement le tableau qui
+    // nous intéresse — bien plus rapide et fiable qu'espérer un vrai calme réseau complet.
+    const response = await page.goto(`${FUTBIN_BASE}${queryString}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const found = await page.waitForSelector('table tbody tr.player-row', { timeout: 20000 }).then(() => true).catch(() => false);
 
     if (!found) {
       // Diagnostic : si le tableau attendu n'apparaît pas, on log ce qu'on a vraiment reçu
