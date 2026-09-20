@@ -1,0 +1,56 @@
+name: Build unsigned IPA
+
+# Compile l'app sur un runner macOS hébergé par GitHub (gratuit) puisqu'aucun Mac local
+# n'est disponible. L'IPA produit n'est PAS signé par Apple : la signature réelle se fait
+# ensuite en local sur PC Windows avec Sideloadly, qui gère l'identifiant Apple gratuit
+# et l'installation sur l'iPhone via câble USB.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sélectionner Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Installer XcodeGen
+        run: brew install xcodegen
+
+      - name: Générer le projet Xcode
+        run: xcodegen generate
+
+      - name: Compiler (non signé)
+        run: |
+          xcodebuild \
+            -project FUTMarketWatch.xcodeproj \
+            -scheme FUTMarketWatch \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            clean build
+
+      - name: Empaqueter en .ipa
+        run: |
+          cd build/Build/Products/Release-iphoneos
+          mkdir Payload
+          cp -R FUTMarketWatch.app Payload/
+          zip -r FUTMarketWatch.ipa Payload
+          mv FUTMarketWatch.ipa "$GITHUB_WORKSPACE/FUTMarketWatch.ipa"
+
+      - name: Publier l'artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FUTMarketWatch-ipa
+          path: FUTMarketWatch.ipa
+          retention-days: 14
