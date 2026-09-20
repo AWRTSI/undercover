@@ -155,8 +155,13 @@ function buildResponsePlayer(row, scrapedAt) {
 async function runScrape() {
   if (state.isScraping) return;
   state.isScraping = true;
-  const browser = await chromium.launch({ headless: true });
+  // `chromium.launch()` DOIT être dans le try : s'il échoue (avant, il était lancé avant le
+  // bloc try/finally), `isScraping` restait bloqué à `true` pour toujours — plus aucun scrape
+  // ne se relançait jamais après un premier échec de lancement du navigateur, sans la moindre
+  // erreur visible côté appelant (juste un retour silencieux immédiat à chaque appel suivant).
+  let browser;
   try {
+    browser = await chromium.launch({ headless: true });
     for (const pageNumber of PAGES_TO_SCRAPE) {
       const rows = await scrapeQuery(browser, `?page=${pageNumber}`);
       recordScrapedRows(rows, Date.now());
@@ -165,7 +170,7 @@ async function runScrape() {
     }
     state.lastScrapedAt = Date.now();
   } finally {
-    await browser.close();
+    await browser?.close();
     state.isScraping = false;
   }
 }
@@ -226,6 +231,36 @@ app.get('/search', async (req, res) => {
     res.json({ query, players });
   } catch (error) {
     res.status(502).json({ error: 'search_failed', message: String(error) });
+  }
+});
+
+/** Diagnostic : lance UN scrape isolé et renvoie tout ce qui s'est passé directement dans la
+ * réponse HTTP (titre de page, statut, nombre de lignes trouvées, extrait du texte) — pour ne
+ * pas dépendre d'un aller-retour par les logs Render à chaque hypothèse à vérifier. À retirer
+ * une fois le scraping fiable en production. */
+app.get('/debug-scrape', async (_req, res) => {
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage({ userAgent: USER_AGENT });
+    const response = await page.goto(`${FUTBIN_BASE}?page=1`, { waitUntil: 'networkidle', timeout: 30000 });
+    const found = await page.waitForSelector('table tbody tr.player-row', { timeout: 15000 }).then(() => true).catch(() => false);
+    const rowCount = await page.$$eval('table tbody tr.player-row', (trs) => trs.length).catch(() => -1);
+    const title = await page.title().catch(() => '?');
+    const bodySnippet = await page.evaluate(() => document.body?.innerText?.slice(0, 500) ?? '').catch(() => '?');
+    await page.close();
+    res.json({
+      finalURL: page.url(),
+      httpStatus: response?.status(),
+      tablePlayerRowFound: found,
+      rowCount,
+      pageTitle: title,
+      bodySnippet,
+    });
+  } catch (error) {
+    res.status(500).json({ stage: 'exception', error: String(error), stack: error?.stack });
+  } finally {
+    await browser?.close();
   }
 });
 
