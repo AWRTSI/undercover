@@ -9,6 +9,18 @@ enum Rarity: String, Codable, CaseIterable, Identifiable, Sendable {
     case hero = "Héros"
 
     var id: String { rawValue }
+
+    /// FUTBIN classe ses cartes sous des dizaines de libellés (TOTW, TOTS, Icon, Hero, Rare
+    /// Gold, promos diverses...) que l'app ne distingue pas toutes : on les ramène aux 5
+    /// raretés connues, tout le reste (contenu événementiel/promo) devenant "Spéciale".
+    init(futbinCardType label: String) {
+        let lowered = label.lowercased()
+        if lowered.contains("icon") { self = .icon }
+        else if lowered.contains("hero") { self = .hero }
+        else if lowered.contains("rare") { self = .rare }
+        else if lowered.contains("common") { self = .common }
+        else { self = .special }
+    }
 }
 
 enum PlayerPosition: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -17,6 +29,28 @@ enum PlayerPosition: String, Codable, CaseIterable, Identifiable, Sendable {
     case lw = "AG", rw = "AD", st = "BU", cf = "AC"
 
     var id: String { rawValue }
+
+    /// FUTBIN donne des positions en anglais (parfois plusieurs séparées par une virgule pour
+    /// les postes secondaires) ; on ne garde que la première, celle qui compte pour le poste
+    /// principal affiché sur la carte.
+    init(futbinCode raw: String) {
+        let code = raw.split(separator: ",").first.map(String.init)?.trimmingCharacters(in: .whitespaces).uppercased() ?? ""
+        switch code {
+        case "GK": self = .gk
+        case "CB": self = .cb
+        case "LB", "LWB": self = .lb
+        case "RB", "RWB": self = .rb
+        case "CDM": self = .cdm
+        case "CM": self = .cm
+        case "CAM": self = .cam
+        case "LM": self = .lm
+        case "RM": self = .rm
+        case "LW": self = .lw
+        case "RW": self = .rw
+        case "CF": self = .cf
+        default: self = .st
+        }
+    }
 }
 
 /// Point d'une série temporelle de prix (chandelle simplifiée BIN marché).

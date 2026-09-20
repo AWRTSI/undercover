@@ -21,6 +21,9 @@ final class UserFilterSettings {
     /// ce réglage ne fait qu'indiquer l'intention pour l'intégration future — le mock ne
     /// simule qu'un seul marché générique, non spécifique à une plateforme.
     var platformRaw: String
+    /// URL du service de scraping FUTBIN déployé (voir `scraper-service/`), ex.
+    /// "https://fut-market-scraper.onrender.com". Vide = données simulées (mock).
+    var apiBaseURLString: String
 
     /// Valeurs par défaut volontairement permissives : un premier lancement doit montrer des
     /// opportunités concrètes plutôt qu'un flux vide, quitte à ce que l'utilisateur resserre
@@ -34,7 +37,8 @@ final class UserFilterSettings {
         minimumMarginPercent: Double = 0.05,
         maxRiskLevel: RiskLevel = .medium,
         enabledAlertTypes: [AlertType] = AlertType.allCases,
-        platform: GamingPlatform = .console
+        platform: GamingPlatform = .console,
+        apiBaseURLString: String = ""
     ) {
         self.availableBudget = availableBudget
         self.minimumNetProfit = minimumNetProfit
@@ -42,6 +46,7 @@ final class UserFilterSettings {
         self.maxRiskLevelRaw = maxRiskLevel.rawValue
         self.enabledAlertTypesRaw = enabledAlertTypes.map(\.rawValue)
         self.platformRaw = platform.rawValue
+        self.apiBaseURLString = apiBaseURLString
     }
 
     var maxRiskLevel: RiskLevel {

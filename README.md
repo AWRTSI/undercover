@@ -23,14 +23,23 @@ UserNotifications — tous frameworks Apple).
 - `Models/` — `Player`, `MarketAlert`, `SBCRequirement`, modèles SwiftData (`WatchlistItem`,
   `HoldingPosition`, `Transaction`, `UserFilterSettings`).
 - `Services/` — `MarketDataServiceProtocol` (abstraction API), `MockMarketDataService` (données
-  factices utilisées par défaut), `RemoteMarketDataService` (squelette REST/WebSocket à activer
-  avec une vraie API), `OpportunityDetectionEngine` (sniping, tendances), `SBCPredictionService`,
-  `TaxCalculator`, `NotificationService`.
+  factices utilisées par défaut), `RemoteMarketDataService` (branché sur `scraper-service/`,
+  actif dès qu'une URL est configurée dans Réglages), `OpportunityDetectionEngine` (sniping,
+  tendances, investissement), `SBCPredictionService`, `TaxCalculator`, `NotificationService`.
 - `ViewModels/` — un ViewModel par écran, MVVM.
 - `Views/` — Dashboard, Filons (centre de notifications), Watchlist, Portefeuille, Calculateur
   de taxe, Réglages.
 
-## Brancher une vraie API
+## Brancher une vraie source de prix (FUTBIN)
 
-Remplacer `MockMarketDataService()` par `RemoteMarketDataService(baseURL:)` dans
-`App/AppDependencies.swift`.
+FUTBIN n'a pas d'API publique (403 sur un fetch basique — testé) ; le dossier
+[`scraper-service/`](../scraper-service) contient un petit serveur Node.js/Playwright qui
+charge ses pages avec un vrai navigateur headless et expose les prix de référence FC 27 en
+JSON. Voir son propre README pour le déployer (gratuit sur Render).
+
+Une fois déployé, colle l'URL du service dans Réglages → Source de données, dans l'app — pas
+besoin de recompiler. `RemoteMarketDataService.swift` bascule automatiquement dessus.
+
+Limite à connaître : FUTBIN affiche un prix de référence agrégé, pas des annonces individuelles
+du marché EA — donc pas de vrai "sniping" d'annonce précise, seulement du suivi de tendance et
+de dynamique de prix dans le temps (catégories Tendance/Investissement).

@@ -26,6 +26,7 @@ struct FUTMarketWatchApp: App {
                 .environmentObject(dependencies)
                 .task {
                     bootstrapDefaultSettingsIfNeeded()
+                    applyConfiguredMarketDataSource()
                     await dependencies.notificationService.requestAuthorizationIfNeeded()
                 }
         }
@@ -44,5 +45,17 @@ struct FUTMarketWatchApp: App {
         guard existingCount == 0 else { return }
         context.insert(UserFilterSettings())
         try? context.save()
+    }
+
+    /// Bascule vers le vrai service de scraping FUTBIN si une URL a été configurée dans les
+    /// Réglages ; sinon reste sur les données simulées (comportement par défaut).
+    @MainActor
+    private func applyConfiguredMarketDataSource() {
+        let context = sharedModelContainer.mainContext
+        let descriptor = FetchDescriptor<UserFilterSettings>()
+        guard let settings = try? context.fetch(descriptor).first else { return }
+        let trimmed = settings.apiBaseURLString.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, let url = URL(string: trimmed) else { return }
+        dependencies.useRemoteMarketData(baseURL: url)
     }
 }

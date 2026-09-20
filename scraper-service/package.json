@@ -1,0 +1,15 @@
+{
+  "name": "fut-market-scraper",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Scrape le prix de référence FUTBIN (FC 27) et l'expose en JSON pour FUT Market Watch.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "playwright": "^1.49.0"
+  }
+}

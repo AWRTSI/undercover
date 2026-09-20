@@ -15,6 +15,9 @@ struct SettingsView: View {
     /// chaque réglage écrivait sur un objet différent aussitôt jeté — les valeurs ne
     /// persistaient jamais vraiment. D'où les plantages et réglages qui ne "prenaient" pas.
     @State private var localFallback = UserFilterSettings()
+    @State private var apiURLDraft: String = ""
+    @State private var apiURLFeedback: String?
+    @State private var hasLoadedDraft = false
 
     init(dependencies: AppDependencies) {
         _viewModel = StateObject(wrappedValue: SettingsViewModel(dependencies: dependencies))
@@ -28,13 +31,20 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 notificationSection
+                dataSourceSection
                 platformSection
                 budgetSection
                 riskSection
                 typesSection
             }
             .navigationTitle("Réglages")
-            .task { await viewModel.refreshNotificationStatus() }
+            .task {
+                await viewModel.refreshNotificationStatus()
+                if !hasLoadedDraft {
+                    apiURLDraft = filterSettings.apiBaseURLString
+                    hasLoadedDraft = true
+                }
+            }
         }
     }
 
@@ -65,6 +75,36 @@ struct SettingsView: View {
         }
     }
 
+    private var dataSourceSection: some View {
+        Section {
+            TextField("https://ton-service.onrender.com", text: $apiURLDraft)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Appliquer") {
+                switch viewModel.applyMarketDataSource(urlString: apiURLDraft) {
+                case .appliedRemote:
+                    filterSettings.apiBaseURLString = apiURLDraft.trimmingCharacters(in: .whitespaces)
+                    apiURLFeedback = "Connecté au service de scraping FUTBIN."
+                case .appliedMock:
+                    filterSettings.apiBaseURLString = ""
+                    apiURLFeedback = "Retour aux données simulées (mock)."
+                case .invalidURL:
+                    apiURLFeedback = "URL invalide — vérifie qu'elle commence par https://"
+                }
+            }
+            if let apiURLFeedback {
+                Text(apiURLFeedback)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Source de données")
+        } footer: {
+            Text("Laisse vide pour rester sur les données simulées. Colle ici l'URL Render de ton service de scraping FUTBIN (dossier scraper-service/) pour passer sur de vrais prix de référence FC 27.")
+        }
+    }
+
     private var platformSection: some View {
         Section {
             Picker("Marché", selection: Binding(
@@ -76,7 +116,7 @@ struct SettingsView: View {
                 }
             }
         } footer: {
-            Text("EA sépare le marché Console (PS5/Xbox, mêmes prix) du marché PC. Les prix affichés ici restent 100% simulés tant qu'aucune vraie source de données n'est branchée (voir RemoteMarketDataService) ; ce réglage prépare l'intégration future pour cibler le bon marché.")
+            Text("EA sépare le marché Console (PS5/Xbox, mêmes prix) du marché PC. Le service de scraping renvoie les deux prix ; l'app utilise actuellement le prix Console (PS5) en priorité quel que soit ce réglage — le brancher dynamiquement sur ce choix est une amélioration à venir.")
         }
     }
 

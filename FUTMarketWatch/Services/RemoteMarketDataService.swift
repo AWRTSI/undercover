@@ -1,21 +1,25 @@
 import Foundation
 
-/// Implémentation réseau de `MarketDataServiceProtocol` : REST pour les lectures ponctuelles
-/// (snapshot, historique, SBCs) et WebSocket pour le flux de prix temps réel.
+/// Implémentation réseau de `MarketDataServiceProtocol`, branchée sur le service de scraping
+/// FUTBIN (voir `scraper-service/` à la racine du dépôt). FUTBIN n'a pas d'API publique — ce
+/// service tiers charge ses pages avec un vrai navigateur headless et expose les prix de
+/// référence en JSON ; cette classe consomme ce JSON et le transforme en `Player`.
 ///
-/// Squelette prêt à brancher sur une API de données de marché externe — non utilisé tant
-/// qu'aucune URL de production n'est fournie. Remplacer `MockMarketDataService` par ce type
-/// dans `AppDependencies` une fois l'API disponible.
+/// Important : EA fait coexister un marché "Console" (PS5/Xbox, prix partagés) et un marché PC
+/// distinct. Le scraper renvoie les deux ; on privilégie le prix Console (PS5) par défaut,
+/// avec repli sur le prix PC si la carte n'a pas de prix Console au moment du scrape.
 ///
-/// Important : EA fait coexister un marché "Console" (PS5/Xbox, prix partagés) et un marché
-/// PC distinct, avec des prix qui divergent réellement. `UserFilterSettings.platform` porte
-/// la préférence de l'utilisateur (PS5 par défaut) ; une vraie intégration doit transmettre
-/// cette plateforme à l'API (paramètre de requête ou endpoint dédié) pour chaque appel REST/WS
-/// ci-dessous, sans quoi les prix récupérés ne correspondraient pas au bon marché.
-final class RemoteMarketDataService: NSObject, MarketDataServiceProtocol {
+/// Limite connue : FUTBIN affiche un prix de référence agrégé, pas des annonces individuelles
+/// du marché EA — donc pas de vrai "sniping" d'annonce précise, seulement du suivi de tendance
+/// et de dynamique de prix dans le temps (voir `OpportunityDetectionEngine`).
+actor RemoteMarketDataService: MarketDataServiceProtocol {
     private let baseURL: URL
     private let session: URLSession
-    private var webSocketTask: URLSessionWebSocketTask?
+
+    /// Le scraper identifie chaque carte par un ID FUTBIN (string) ; l'app utilise des UUID
+    /// partout ailleurs. On dérive un UUID stable à partir de cet ID (voir `UUID.init(deterministicFrom:)`)
+    /// et on garde cette table pour retrouver l'ID d'origine (ex. pour l'historique détaillé).
+    private var sourceIDByUUID: [UUID: String] = [:]
 
     init(baseURL: URL, session: URLSession = .shared) {
         self.baseURL = baseURL
@@ -23,79 +27,120 @@ final class RemoteMarketDataService: NSObject, MarketDataServiceProtocol {
     }
 
     func fetchMarketSnapshot() async throws -> [Player] {
-        try await get([Player].self, path: "market/snapshot")
+        let url = baseURL.appendingPathComponent("players")
+        let (data, response) = try await session.data(from: url)
+        try Self.validate(response)
+
+        let decoded: ScrapedPlayersResponse
+        do {
+            decoded = try JSONDecoder().decode(ScrapedPlayersResponse.self, from: data)
+        } catch {
+            throw MarketDataError.decoding(underlying: error)
+        }
+
+        return decoded.players.compactMap { scraped in
+            guard let price = scraped.pricePS ?? scraped.pricePC else { return nil }
+
+            let uuid = UUID(deterministicFrom: "futbin-\(scraped.id)")
+            sourceIDByUUID[uuid] = scraped.id
+
+            let history = (scraped.history ?? []).map { $0.asPricePoint }
+
+            return Player(
+                id: uuid,
+                name: scraped.name,
+                club: "Inconnu",
+                nation: "Inconnu",
+                league: "Inconnu",
+                position: PlayerPosition(futbinCode: scraped.position),
+                overall: scraped.overall,
+                rarity: Rarity(futbinCardType: scraped.rarity),
+                imageURL: nil,
+                currentPrice: price,
+                rollingAveragePrice: scraped.rollingAveragePrice ?? price,
+                priceHistory: history
+            )
+        }
     }
 
     func fetchPriceHistory(for playerID: UUID, since: Date) async throws -> [PricePoint] {
-        let isoDate = ISO8601DateFormatter().string(from: since)
-        return try await get([PricePoint].self, path: "market/players/\(playerID)/history?since=\(isoDate)")
+        guard let sourceID = sourceIDByUUID[playerID] else { return [] }
+        let url = baseURL.appendingPathComponent("players/\(sourceID)/history")
+        let (data, response) = try await session.data(from: url)
+        try Self.validate(response)
+
+        let decoded: ScrapedHistoryResponse
+        do {
+            decoded = try JSONDecoder().decode(ScrapedHistoryResponse.self, from: data)
+        } catch {
+            throw MarketDataError.decoding(underlying: error)
+        }
+        return decoded.history.map { $0.asPricePoint }.filter { $0.timestamp >= since }
     }
 
+    /// Le service de scraping ne couvre pas les SBC/objectifs (aucune source publique fiable
+    /// identifiée pour ces données) : on reste sur le mock pour cette partie en attendant mieux.
     func fetchActiveSBCs() async throws -> [SBCRequirement] {
-        try await get([SBCRequirement].self, path: "sbc/active")
+        MockData.activeSBCs
     }
 
-    func priceUpdatesStream() -> AsyncStream<Player> {
+    /// Contrairement au mock (qui simule une fluctuation par seconde pour "faire vivant"), une
+    /// vraie source scrapée ne change vraiment que toutes les ~20 minutes (fraîcheur gérée côté
+    /// serveur). On revérifie toutes les 5 minutes et on republie l'ensemble du marché à chaque
+    /// fois plutôt qu'une carte au hasard.
+    nonisolated func priceUpdatesStream() -> AsyncStream<Player> {
         AsyncStream { continuation in
-            let url = baseURL.appendingPathComponent("market/stream")
-            let task = session.webSocketTask(with: url)
-            webSocketTask = task
-            task.resume()
-
-            func listen() {
-                task.receive { [weak self] result in
-                    guard let self else { return }
-                    switch result {
-                    case .success(.data(let data)):
-                        if let player = try? JSONDecoder.futMarket.decode(Player.self, from: data) {
-                            continuation.yield(player)
-                        }
-                        listen()
-                    case .success(.string(let text)):
-                        if let data = text.data(using: .utf8),
-                           let player = try? JSONDecoder.futMarket.decode(Player.self, from: data) {
-                            continuation.yield(player)
-                        }
-                        listen()
-                    case .success:
-                        listen()
-                    case .failure:
-                        continuation.finish()
+            let task = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 300_000_000_000)
+                    guard !Task.isCancelled, let players = try? await self.fetchMarketSnapshot() else { continue }
+                    for player in players {
+                        continuation.yield(player)
                     }
                 }
+                continuation.finish()
             }
-            listen()
-
-            continuation.onTermination = { _ in
-                task.cancel(with: .goingAway, reason: nil)
-            }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 
-    private func get<T: Decodable>(_ type: T.Type, path: String) async throws -> T {
-        let url = baseURL.appendingPathComponent(path)
-        do {
-            let (data, response) = try await session.data(from: url)
-            guard let http = response as? HTTPURLResponse else { throw MarketDataError.unknown }
-            guard http.statusCode != 401 else { throw MarketDataError.unauthorized }
-            guard (200..<300).contains(http.statusCode) else { throw MarketDataError.unknown }
-            do {
-                return try JSONDecoder.futMarket.decode(T.self, from: data)
-            } catch {
-                throw MarketDataError.decoding(underlying: error)
-            }
-        } catch let error as MarketDataError {
-            throw error
-        } catch {
-            throw MarketDataError.network(underlying: error)
-        }
+    private static func validate(_ response: URLResponse) throws {
+        guard let http = response as? HTTPURLResponse else { throw MarketDataError.unknown }
+        guard http.statusCode != 401 else { throw MarketDataError.unauthorized }
+        guard (200..<300).contains(http.statusCode) else { throw MarketDataError.unknown }
     }
 }
 
-extension JSONDecoder {
-    static let futMarket: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }()
+/// Formes JSON exactes renvoyées par `scraper-service/server.js` — garder synchronisé si le
+/// contrat du serveur change.
+private struct ScrapedPlayersResponse: Decodable {
+    let lastScrapedAt: Double?
+    let players: [ScrapedPlayer]
+}
+
+private struct ScrapedPlayer: Decodable {
+    let id: String
+    let name: String
+    let overall: Int
+    let rarity: String
+    let position: String
+    let pricePS: Int?
+    let pricePC: Int?
+    let rollingAveragePrice: Int?
+    let history: [ScrapedPricePoint]?
+}
+
+private struct ScrapedHistoryResponse: Decodable {
+    let id: String
+    let history: [ScrapedPricePoint]
+}
+
+private struct ScrapedPricePoint: Decodable {
+    /// Millisecondes depuis epoch (`Date.now()` côté Node), pas des secondes.
+    let timestamp: Double
+    let price: Int
+
+    var asPricePoint: PricePoint {
+        PricePoint(timestamp: Date(timeIntervalSince1970: timestamp / 1000), price: price)
+    }
 }

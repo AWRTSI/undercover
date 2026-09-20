@@ -5,7 +5,12 @@ import Foundation
 /// toucher aux ViewModels.
 @MainActor
 final class AppDependencies: ObservableObject {
-    let marketDataService: MarketDataServiceProtocol
+    /// `private(set)` plutôt que `let` : le service de marché démarre sur le mock, puis bascule
+    /// vers `RemoteMarketDataService` une fois l'URL du scraper lue depuis les Réglages
+    /// persistés (voir `FUTMarketWatchApp.bootstrapDefaultSettingsIfNeeded`). Les ViewModels
+    /// lisent `dependencies.marketDataService` à chaque appel plutôt que de le capturer une
+    /// fois, donc ce changement s'applique sans qu'ils aient besoin d'être recréés.
+    private(set) var marketDataService: MarketDataServiceProtocol
     let detectionEngine: OpportunityDetectionEngine
     let notificationService: NotificationService
 
@@ -17,5 +22,13 @@ final class AppDependencies: ObservableObject {
         self.marketDataService = marketDataService
         self.detectionEngine = detectionEngine
         self.notificationService = notificationService
+    }
+
+    func useRemoteMarketData(baseURL: URL) {
+        marketDataService = RemoteMarketDataService(baseURL: baseURL)
+    }
+
+    func useMockMarketData() {
+        marketDataService = MockMarketDataService()
     }
 }
